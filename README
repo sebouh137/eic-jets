@@ -1,0 +1,10 @@
+# For the example below, I assume you have already installed delphes in ../delphes_install
+
+# To create the initial root file (you may want to increase the number of events in the pythia card file):
+../delphes_install/bin/DelphesPythia8 tcl/delphes_card_allsilicon_3T.tcl pythia8cards/CC_DIS.cmnd out_10k.root
+
+# Then convert this to a tuple format (much easier to process with pandas)
+python python/eicroot2pandas.py out_10k.root test.root 10000 -h
+
+# Then you can open the created tuple file in a notebook.  
+jupyter notebook python/CC_DIS_Plots_For_Paper.ipynb
