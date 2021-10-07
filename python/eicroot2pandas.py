@@ -1,8 +1,13 @@
 import ROOT, numpy as np, pandas as pd, sys, root_pandas,time
 ROOT.gSystem.Load('../delphes_install/lib/libDelphes')
 
+n_bad_tracks = 0
+n_tracks = 0
 
 def JB(event):
+
+    VAP = 0
+    VP = 0
     branchEFlowTrack = event.EFlowTrack
     branchElectron = event.Electron
     branchEFlowPhoton = event.EFlowPhoton
@@ -11,9 +16,18 @@ def JB(event):
     temp_p = ROOT.TVector3(0,0,0)
     for i in range(branchEFlowTrack.GetEntries()):
        track_mom = branchEFlowTrack.At(i).P4()
+       #print(track_mom.Pz(),track_mom.E())
        delta_track += (track_mom.E() - track_mom.Pz())
        temp_p = temp_p + track_mom.Vect()
-       #print track_mom.E() , ' ' , track_mom.Pz()
+       
+       #debug: check fraction of bad tracks
+       global n_bad_tracks
+       global n_tracks
+       if np.isnan(track_mom.Pz()):
+           n_bad_tracks+=1
+       n_tracks+=1
+       print("bad track fraction",n_bad_tracks/n_tracks)
+       #print(track_mom.E() , ' ' , track_mom.Pz())
     if branchElectron.GetEntries()>0:
         e = branchElectron.At(0).P4()
         delta_track_noel = delta_track - (e.E() - e.Pz())
@@ -34,8 +48,33 @@ def JB(event):
            pt_noBarrel = pt_noBarrel + pf_mom.Vect()
     delta = delta_track + delta_photon + delta_neutral
     
+    
+    
+    
+    
+    #if np.isnan(delta) :
+    #print(delta, delta_track, delta_photon, delta_neutral)
+    
     y_JB   = (delta)/(2.0*10.0)
     ptmiss = temp_p.Perp()
+    
+    for i in range(branchEFlowPhoton.GetEntries()):
+        pf_mom = branchEFlowPhoton.At(i).P4()
+        dot =pf_mom.X() * temp_p.X() + pf_mom.Y() * temp_p.Y()
+        if(dot > 0):
+            VP += dot
+        else :
+            VAP += -dot
+            
+        
+    for i in range(branchEFlowNeutralHadron.GetEntries()):
+        pf_mom = branchEFlowNeutralHadron.At(i).P4()
+        dot =pf_mom.X() * temp_p.X() + pf_mom.Y() * temp_p.Y()
+        if(dot > 0):
+            VP += dot
+        else :
+            VAP += -dot
+    
     
     Q2_JB  = (ptmiss*ptmiss)/(1-y_JB)
     
@@ -45,7 +84,7 @@ def JB(event):
     else:
         x_JB = -999
     pt_all = temp_p
-    return pt_all.Pt(), pt_all.Eta(), pt_all.Phi(), Q2_JB, x_JB,y_JB
+    return pt_all.Pt(), pt_all.Eta(), pt_all.Phi(), Q2_JB, x_JB,y_JB,delta,VAP, VP
 
 def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_maxR = 0.9):
     start = time.perf_counter()
@@ -83,7 +122,13 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
     # index of the jet within the event.
     # To create a subtuple with exactly one entry per event, one can do df.query("Jet_i == 0")
     allFields.append("Jet_i")
-
+    
+    #set up counters for every type of common constituent (>1% of the total constituents.
+    pids = (22,211,-211,2212,-2212,2112,-2112,130,310,321,-321)
+    for pid in pids :
+        allFields.append("GenJet_n_"+("m" if pid <0 else "") + str(abs(pid)))
+    allFields.append("GenJet_n_other")
+    
     #modify the names of the columns in the output (so that it's easier to use)
     inputNames = {name : name.replace("_",".").replace("Neutrino","Particle").replace("Quark","Particle").replace("Hadron_","") for name in allFields}
     for name in allFields:
@@ -96,9 +141,9 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         
         match_indices = []
         
-        met_JB,eta_JB,phi_JB, Q2_JB, x_JB,y_JB = JB(event)
+        met_JB,eta_JB,phi_JB, Q2_JB, x_JB,y_JB,delta_JB,VAP,VP = JB(event)
         if not "JB_MET" in d.keys():
-            for f in 'JB_MET JB_Eta JB_Phi JB_Q2 JB_x JB_y'.split():
+            for f in 'JB_MET JB_Eta JB_Phi JB_Q2 JB_x JB_y JB_delta VAP VP'.split():
                 d[f] = []
         
         
@@ -166,6 +211,24 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         if(debug):
             print("finding matches complete")
         
+        #count the number of each type of constituent in the generated jets:
+        counts = {}
+        for pid in pids:
+            counts[pid] = []
+        count_other = []
+        for genjet in event.GenJet:
+            count_other.append(0)
+            for pid in pids:
+                counts[pid].append(0)
+            for particle in genjet.Particles:
+                #print("constituent pid = " + str(particle.PID))
+                if int(particle.PID) in pids:
+                    pid = particle.PID
+                    counts[pid][-1] = 1+counts[pid][-1]
+                    
+                else:
+                    count_other[-1] = 1+count_other[-1]
+        
         #loop through recon jets
         for j,jet in enumerate(event.Jet):
             ntracks = 0
@@ -181,6 +244,17 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                         d[name].append(tree.GetLeaf(inputNames[name]).GetValue(match_indices[j]))
                     else :
                         d[name].append(0)
+                if match_indices[j] != -1:
+                    for pid in pids:
+                        fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                        d[fieldname].append(counts[pid][match_indices[j]])
+                    d["GenJet_n_other"].append(count_other[match_indices[j]])
+                else :
+                    for pid in pids:
+                        fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                        d[fieldname].append(0)
+                    d["GenJet_n_other"].append(0)
+                
                 for name in neutrinoFields:
                     d[name].append(nu_properties[name])
                 for name in quarkFields:
@@ -217,8 +291,11 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 d['JB_Q2'].append(Q2_JB)
                 d['JB_x'].append(x_JB)
                 d['JB_y'].append(y_JB)
+                d['JB_delta'].append(delta_JB)
+                d['VAP'].append(VAP)
+                d['VP'].append(VP)
                 ntracks+=1
-            # jet without tracks (only neutrals)
+            # jet without constituents (does this ever happen?)
             if ntracks == 0:
                 for name in jetFields:
                     d[name].append(getattr(jet,name.replace("Jet_","")))
@@ -238,6 +315,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 d['Jet_i'].append(j)
                 for name in hadronFields:
                     d[name].append(0)
+                
                 d['Hadron_i'].append(0)
                 d['JB_MET'].append(met_JB)
                 d['JB_Eta'].append(eta_JB)
@@ -245,6 +323,19 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 d['JB_Q2'].append(Q2_JB)
                 d['JB_x'].append(x_JB)
                 d['JB_y'].append(y_JB)
+                d['JB_delta'].append(delta_JB)
+                d['VAP'].append(VAP)
+                d['VP'].append(VP)
+                if match_indices[j] != -1:
+                    for pid in pids:
+                        fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                        d[fieldname].append(counts[match_indices[j]][pid])
+                    d["GenJet_n_other"].append(count_other[match_indices[j]])
+                else :
+                    for pid in pids:
+                        fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                        d[fieldname].append(0)
+                    d["GenJet_n_other"].append(0)
         if(debug):
             print("adding recon jets complete")
         
@@ -272,6 +363,13 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 d['JB_Q2'].append(Q2_JB)
                 d['JB_x'].append(x_JB)
                 d['JB_y'].append(y_JB)
+                d['JB_delta'].append(delta_JB)
+                d['VAP'].append(VAP)
+                d['VP'].append(VP)
+                for pid in pids:
+                    fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                    d[fieldname].append(counts[pid][k])
+                d["GenJet_n_other"].append(count_other[k])
                 ii+=1
         if(debug):
             print("adding unmatched gen jets complete")
@@ -297,6 +395,13 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
             d['JB_Q2'].append(Q2_JB)
             d['JB_x'].append(x_JB)
             d['JB_y'].append(y_JB)
+            d['JB_delta'].append(delta_JB)
+            d['VAP'].append(VAP)
+            d['VP'].append(VP)
+            for pid in pids:
+                fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                d[fieldname].append(0)
+            d["GenJet_n_other"].append(0)
         del q_properties
         del nu_properties
         
