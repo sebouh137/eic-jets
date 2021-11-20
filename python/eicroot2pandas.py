@@ -26,7 +26,7 @@ def JB(event):
        if np.isnan(track_mom.Pz()):
            n_bad_tracks+=1
        n_tracks+=1
-       print("bad track fraction",n_bad_tracks/n_tracks)
+       #print("bad track fraction",n_bad_tracks/n_tracks)
        #print(track_mom.E() , ' ' , track_mom.Pz())
     if branchElectron.GetEntries()>0:
         e = branchElectron.At(0).P4()
@@ -97,6 +97,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
     genJetFields = ["GenJet_" + name for name in fields]
     
     
+    
     #fields = "PID Status IsPU M1 M2 D1 D2 Mass E Px Py Pz PT Eta Phi Rapidity D0 DZ".split()
     fields = "PID Status E Px Py Pz PT Eta".split()
     
@@ -111,7 +112,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
     
     otherFields = ["MissingET_MET", "MissingET_Eta", "MissingET_Phi","GenMissingET_MET", "GenMissingET_Eta","GenMissingET_Phi","Event_Number"]
 
-    allFields = jetFields + genJetFields + neutrinoFields + quarkFields + otherFields + "Gen_W2 Gen_x Gen_y Gen_Q2".split()
+    allFields = jetFields + genJetFields + neutrinoFields + quarkFields + otherFields + "Gen_W2 Gen_x Gen_y Gen_Q2 GenJet_size".split()
 
     if hadronTuple:
         allFields+= hadronFields
@@ -127,7 +128,10 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
     pids = (22,211,-211,2212,-2212,2112,-2112,130,310,321,-321)
     for pid in pids :
         allFields.append("GenJet_n_"+("m" if pid <0 else "") + str(abs(pid)))
+        #also include the number of each type of constituent in the recon jets (as identified by the truth pids)
+        allFields.append("Jet_n_"+("m" if pid <0 else "") + str(abs(pid)))
     allFields.append("GenJet_n_other")
+    allFields.append("Jet_n_other")
     
     #modify the names of the columns in the output (so that it's easier to use)
     inputNames = {name : name.replace("_",".").replace("Neutrino","Particle").replace("Quark","Particle").replace("Hadron_","") for name in allFields}
@@ -139,7 +143,6 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         if N != None and i>N and N>0:
             break
         
-        match_indices = []
         
         met_JB,eta_JB,phi_JB, Q2_JB, x_JB,y_JB,delta_JB,VAP,VP = JB(event)
         if not "JB_MET" in d.keys():
@@ -188,26 +191,73 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
             other_properties[name] = tree.GetLeaf(inputNames[name]).GetValue(0)
         if i%1000 == 0 and i != 0:
             print(other_properties["Event_Number"], "events,", (time.perf_counter()-start), " s,   (",(time.perf_counter()-start)/other_properties["Event_Number"], " s avg)")
+        
         #first find matches
-        for jet in event.Jet:
-            eta = jet.Eta
-            phi = jet.Phi
-            maxR = arg_maxR
-            kbest = -1
-            Rbest = 9999999
-            for k,genJet in enumerate(event.GenJet):
-                etagen = genJet.Eta
-                phigen = genJet.Phi
-                dphi = phi-phigen
-                if dphi > np.pi:
-                    dphi -= phi
-                if dphi < -np.pi:
-                    dphi += phi
-                R = np.hypot(eta-etagen,dphi)
-                if R< Rbest and R<maxR:
-                    Rbest = R
-                    kbest = k
-            match_indices.append(kbest)
+        match_indices = []
+        match_algorithm = "highestEnergy"
+        if match_algorithm == "highestEnergy":
+            match_indices = [-1]*event.Jet_size
+            emax = 0
+            index_recon = -1
+            index_gen = -1
+            for j,jet in enumerate(event.Jet):
+                E = jet.P4().E()
+                if E>emax:
+                    index_recon = j
+                    emax = E
+            emax = 0
+            for j,jet in enumerate(event.GenJet):
+                E = jet.P4().E()
+                if E>emax:
+                    index_gen = j
+                    emax = E
+            if  index_recon != -1:
+                match_indices[index_recon] = index_gen
+        elif match_algorithm == "Preins":
+            #(Sean Preins's algorithm)
+            match_indices = [-1]*event.Jet_size
+            nMatched = 0
+            while nMatched < min(event.Jet_size,event.GenJet_size):
+                minDeltaR = 999
+                jetIndex = -1
+                genJetIndex = -1;
+                
+                for j,jet in enumerate(event.Jet):
+                    if match_indices[j] != -1:
+                       continue
+                    reconJetP4 = jet.P4()
+                    for k,genJet in enumerate(event.GenJet):
+                        if k in match_indices:
+                            continue
+                        genJetP4 = genJet.P4()
+                        R = genJetP4.DeltaR(reconJetP4)
+                        if R < minDeltaR:
+                            minDeltaR = R
+                            jetIndex = j
+                            genJetIndex = k
+                match_indices[jetIndex] = genJetIndex
+                nMatched += 1
+        elif match_algorithm == "old":
+            #old algorithm for finding matching jets
+            for jet in event.Jet:
+                eta = jet.Eta
+                phi = jet.Phi
+                maxR = arg_maxR
+                kbest = -1
+                Rbest = 9999999
+                for k,genJet in enumerate(event.GenJet):
+                    etagen = genJet.Eta
+                    phigen = genJet.Phi
+                    dphi = phi-phigen
+                    if dphi > np.pi:
+                        dphi -= phi
+                    if dphi < -np.pi:
+                        dphi += phi
+                    R = np.hypot(eta-etagen,dphi)
+                    if R< Rbest and R<maxR:
+                        Rbest = R
+                        kbest = k
+                match_indices.append(kbest)
         if(debug):
             print("finding matches complete")
         
@@ -228,6 +278,25 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                     
                 else:
                     count_other[-1] = 1+count_other[-1]
+        #same for recon jets
+        counts_r = {}
+        for pid in pids:
+            counts_r[pid] = []
+        count_other_r = []
+        for jet in event.Jet:
+            count_other_r.append(0)
+            for pid in pids:
+                counts_r[pid].append(0)
+            for particle in jet.Particles:
+                #print("constituent pid = " + str(particle.PID))
+                if int(particle.PID) in pids:
+                    pid = particle.PID
+                    counts_r[pid][-1] = 1+counts_r[pid][-1]
+                    
+                else:
+                    count_other_r[-1] = 1+count_other_r[-1]
+        
+        
         
         #loop through recon jets
         for j,jet in enumerate(event.Jet):
@@ -254,6 +323,10 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                         fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
                         d[fieldname].append(0)
                     d["GenJet_n_other"].append(0)
+                for pid in pids:
+                    fieldname = "Jet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                    d[fieldname].append(counts_r[pid][j])
+                d["Jet_n_other"].append(count_other_r[j])
                 
                 for name in neutrinoFields:
                     d[name].append(nu_properties[name])
@@ -262,6 +335,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 for name in other_properties.keys():
                     d[name].append(other_properties[name])
                 d['Jet_i'].append(j)
+                d['GenJet_size'].append(event.GenJet_size)
                 
                 
                 #there are some fields that only apply to tracks, and others that only apply to towers.
@@ -313,6 +387,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 for name in other_properties.keys():
                     d[name].append(other_properties[name])
                 d['Jet_i'].append(j)
+                d['GenJet_size'].append(event.GenJet_size)
                 for name in hadronFields:
                     d[name].append(0)
                 
@@ -336,6 +411,10 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                         fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
                         d[fieldname].append(0)
                     d["GenJet_n_other"].append(0)
+                for pid in pids:
+                    fieldname = "Jet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                    d[fieldname].append(counts_r[pid][j])
+                d["Jet_n_other"].append(count_other_r[j])
         if(debug):
             print("adding recon jets complete")
         
@@ -357,6 +436,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                     d[name].append(0)
                 d['Hadron_i'].append(0)
                 d['Jet_i'].append(ii)
+                d['GenJet_size'].append(event.GenJet_size)
                 d['JB_MET'].append(met_JB)
                 d['JB_Eta'].append(eta_JB)
                 d['JB_Phi'].append(phi_JB)
@@ -371,6 +451,10 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                     d[fieldname].append(counts[pid][k])
                 d["GenJet_n_other"].append(count_other[k])
                 ii+=1
+                for pid in pids:
+                    fieldname = "Jet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                    d[fieldname].append(0)
+                d["Jet_n_other"].append(0)
         if(debug):
             print("adding unmatched gen jets complete")
         #if there are no gen jets nor recon jets, add an entry for the event itself
@@ -389,6 +473,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 d[name].append(0)
             d['Hadron_i'].append(0)
             d['Jet_i'].append(0)
+            d['GenJet_size'].append(event.GenJet_size)
             d['JB_MET'].append(met_JB)
             d['JB_Eta'].append(eta_JB)
             d['JB_Phi'].append(phi_JB)
@@ -402,6 +487,10 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
                 fieldname = "GenJet_n_"+("m" if pid <0 else "") + str(abs(pid))
                 d[fieldname].append(0)
             d["GenJet_n_other"].append(0)
+            for pid in pids:
+                fieldname = "Jet_n_"+("m" if pid <0 else "") + str(abs(pid))
+                d[fieldname].append(0)
+            d["Jet_n_other"].append(0)
         del q_properties
         del nu_properties
         
