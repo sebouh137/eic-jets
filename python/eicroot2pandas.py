@@ -5,6 +5,8 @@ n_bad_tracks = 0
 n_tracks = 0
 
 def JB(event):
+    pbeam = event.Particle[0].E
+    ebeam = event.Particle[1].E
 
     VAP = 0
     VP = 0
@@ -55,7 +57,7 @@ def JB(event):
     #if np.isnan(delta) :
     #print(delta, delta_track, delta_photon, delta_neutral)
     
-    y_JB   = (delta)/(2.0*10.0)
+    y_JB   = (delta)/(2.0*ebeam)
     ptmiss = temp_p.Perp()
     
     for i in range(branchEFlowPhoton.GetEntries()):
@@ -78,7 +80,7 @@ def JB(event):
     
     Q2_JB  = (ptmiss*ptmiss)/(1-y_JB)
     
-    s     = 4*10.0*275.0
+    s     = 4*ebeam*pbeam
     if(y_JB>0):
         x_JB  = Q2_JB/(s*y_JB)
     else:
@@ -86,7 +88,7 @@ def JB(event):
     pt_all = temp_p
     return pt_all.Pt(), pt_all.Eta(), pt_all.Phi(), Q2_JB, x_JB,y_JB,delta,VAP, VP
 
-def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_maxR = 0.9):
+def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_maxR = 0.9,match_algorithm="highestEnergy"):
     start = time.perf_counter()
     infile = ROOT.TFile(infilename)
     tree = infile.Delphes
@@ -135,23 +137,30 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
     
     #modify the names of the columns in the output (so that it's easier to use)
     inputNames = {name : name.replace("_",".").replace("Neutrino","Particle").replace("Quark","Particle").replace("Hadron_","") for name in allFields}
+    
+    allFields += "ebeam pbeam S".split()
+    
     for name in allFields:
         d[name] = []
 
 
     for i,event in enumerate(tree):
+                    
+        pbeam = event.Particle[0].E
+        ebeam = event.Particle[1].E
         if N != None and i>N and N>0:
             break
         
+        S = (pbeam+ebeam)**2-(np.sqrt(pbeam**2-.9383**2)-np.sqrt(ebeam**2-.000511**2))
         
         met_JB,eta_JB,phi_JB, Q2_JB, x_JB,y_JB,delta_JB,VAP,VP = JB(event)
         if not "JB_MET" in d.keys():
             for f in 'JB_MET JB_Eta JB_Phi JB_Q2 JB_x JB_y JB_delta VAP VP'.split():
                 d[f] = []
         
-        
-        nu_properties = {}
-        q_properties = {}
+        #set everything to dummy values of -999 so that this doesn't crash if we run this on NC DIS
+        nu_properties = {name:-999 for name in neutrinoFields}
+        q_properties = {name:-999 for name in quarkFields}
         other_properties = {}
         #find neutrino and quark
         
@@ -182,6 +191,9 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         other_properties['Gen_W2'] = W2
         other_properties['Gen_x'] = x
         other_properties['Gen_y'] = y
+        other_properties['pbeam'] = pbeam
+        other_properties['ebeam'] = ebeam
+        other_properties['S'] = S
         
         njets = int(tree.GetLeaf("Jet_size").GetValue())
         ngenjets = int(tree.GetLeaf("GenJet_size").GetValue())
@@ -194,7 +206,6 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         
         #first find matches
         match_indices = []
-        match_algorithm = "highestEnergy"
         if match_algorithm == "highestEnergy":
             match_indices = [-1]*event.Jet_size
             emax = 0
@@ -301,6 +312,9 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         #loop through recon jets
         for j,jet in enumerate(event.Jet):
             ntracks = 0
+            # in this case, only use the leading jet
+            if match_algorithm == "highestEnergy" and index_recon != j:
+                continue
             for h,(track,particle) in enumerate(zip(jet.Constituents,jet.Particles)):
                 #if not "Track" in str(type(track)):
                 #    continue
@@ -421,6 +435,9 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         #now add unmatched gen jets:
         ii = njets
         for k,genJet in enumerate(event.GenJet):
+            # in this case, only use the leading jet
+            if match_algorithm == "highestEnergy" and index_gen != k:
+                continue
             if not k in match_indices:
                 for name in genJetFields:
                     d[name].append(getattr(genJet,name.replace("GenJet_","")))
@@ -569,11 +586,12 @@ if __name__ == '__main__':
     infilename=sys.argv[1]
     outfilename=sys.argv[2]
     n = None
-    if len(sys.argv)>2:
-        n = int(sys.argv[3])
-    if "-h" in sys.argv:
-        hadronTuple = True
-    else:
-        hadronTuple = False
-    convert(infilename,outfilename, N=n,hadronTuple=hadronTuple,arg_maxR=0.9)
+    match_algorithm = "highestEnergy"
+    for arg in sys.argv[3:]:
+        if "--n=" in arg:
+            n = int(arg.replace("--n=",""))
+        elif "--match=" in arg:
+            match_algorithm = arg.replace("--match=","")
+    hadronTuple = True
+    convert(infilename,outfilename, N=n,hadronTuple=hadronTuple,arg_maxR=0.9, match_algorithm=match_algorithm)
 
