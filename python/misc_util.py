@@ -49,13 +49,13 @@ def query_or_all(df,q):
         return df
 
 from scipy.optimize import curve_fit 
-def getmeanstd(df, query):
+def getmeanstd(df, query,nsigma=1.5):
 
     a = df.eval(query)
     x0, sigma = np.mean(a), np.std(a)
     #print(x0,sigma)
     nbins = 50
-    y,x = np.histogram(a, bins=nbins,range=(x0-2*sigma,x0+2*sigma))
+    y,x = np.histogram(a, bins=nbins,range=(x0-nsigma*sigma,x0+nsigma*sigma))
     del a
     x = np.add(x[1:],x[:-1])/2
     
@@ -64,6 +64,6 @@ def getmeanstd(df, query):
     
     popt,pcov = curve_fit(gaus,x,y,p0=[1,x0,sigma])
 
-    return popt[1],abs(popt[2])
+    return popt[1],abs(popt[2]), np.sqrt(pcov[1][1]), np.sqrt(pcov[2][2])
     
     
