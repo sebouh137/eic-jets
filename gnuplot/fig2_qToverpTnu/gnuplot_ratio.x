@@ -40,7 +40,7 @@ unset table
 
 plot '< paste up_smooth down1_smooth' u 1:2:5 with filledcurves fillstyle solid 0.5 lw 4.5 lc rgb 'orange' title '',\
      '< paste up_smooth down2_smooth' u 1:2:5 with filledcurves fillstyle solid 0.5 lw 4.5 lc rgb 'orange' title '',\
-     'data/pythia_5.dat' w lines lc 'blue' lw 5 title '$\textsc{Pythia8}$',\
+     'data/pythia_ratio.dat' w lines lc 'blue' lw 5 title '$\textsc{Pythia8}$',\
      'data/ratio_theory_new.dat' u 1:2 w lines smooth csplines lc 'orange' lw 5 title 'NLL',\
 #     'fig5.dat' u 1:($2/$3) w lines smooth csplines lc 'orange' lw 5 title 'theory',\
 #     'fig5_ave.dat' u 1:2 lc 'red' lw 5 title '',\

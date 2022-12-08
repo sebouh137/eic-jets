@@ -3,7 +3,7 @@ set terminal epslatex size 50cm,10cm color dashed dl 3 standalone
 LEFT= 0.15
 DX=0.25
 set style fill  transparent solid 0.50 noborder
-set output 'transverse.tex'
+set output 'qt_theory.tex'
 set multiplot layout 1,1
 
 #------1st plot-----
@@ -45,4 +45,4 @@ set ytics format ""
 
 unset multiplot
 set output # finish the current output file
-system('latex transverse.tex && dvips transverse.dvi && ps2eps -f transverse.ps && epstopdf transverse.eps && rm transverse.inc.eps transverse.ps *.aux *.dvi *.log *.tex')
+system('latex qt_theory.tex && dvips qt_theory.dvi && ps2eps -f qt_theory.ps && epstopdf qt_theory.eps && rm qt_theory.inc.eps qt_theory.ps *.aux *.dvi *.log *.tex')
