@@ -1,5 +1,5 @@
 import ROOT, numpy as np, pandas as pd, sys, root_pandas,time
-ROOT.gSystem.Load('../delphes_install/lib/libDelphes')
+ROOT.gSystem.Load('../Delphes-3.5.0/libDelphes')
 
 n_bad_tracks = 0
 n_tracks = 0
@@ -88,7 +88,7 @@ def JB(event):
     pt_all = temp_p
     return pt_all.Pt(), pt_all.Eta(), pt_all.Phi(), Q2_JB, x_JB,y_JB,delta,VAP, VP
 
-def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_maxR = 0.9,match_algorithm="highestEnergy"):
+def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_maxR = 0.9,match_algorithm="highestEnergy",reaction="CC_DIS"):
     start = time.perf_counter()
     infile = ROOT.TFile(infilename)
     tree = infile.Delphes
@@ -151,7 +151,7 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         if N != None and i>N and N>0:
             break
         
-        S = (pbeam+ebeam)**2-(np.sqrt(pbeam**2-.9383**2)-np.sqrt(ebeam**2-.000511**2))
+        S = (pbeam+ebeam)**2-(np.sqrt(pbeam**2-.9383**2)-np.sqrt(ebeam**2-.000511**2))**2
         
         met_JB,eta_JB,phi_JB, Q2_JB, x_JB,y_JB,delta_JB,VAP,VP = JB(event)
         if not "JB_MET" in d.keys():
@@ -164,14 +164,18 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         other_properties = {}
         #find neutrino and quark
         
-        
+        neutrino=None
+        electron=None
         for particle in event.Particle:
             pid = particle.PID
             status = particle.Status
-            if pid == 12 and status == 1:
+            if pid == 12 or pid==-12 and status == 1:
                 for name in neutrinoFields:
                     #print(name)
                     nu_properties[name] = getattr(particle,name.replace("Neutrino_",""))
+                neutrino=particle
+            if pid == 11 and status == 1:
+                electron=particle
             elif status == 23 and pid in [1,3,5, -2, -4]:
                 for name in quarkFields:
                     #print(name)
@@ -179,8 +183,12 @@ def convert(infilename, outfilename,debug=False,N=None,hadronTuple=False,arg_max
         
         branchParticle=event.Particle
         pProton      = branchParticle.At(0).P4(); #these numbers 0 , 3, 5 are hardcoded in Pythia8
-        pleptonIn    = branchParticle.At(3).P4();
-        pleptonOut   = branchParticle.At(5).P4();
+        pleptonIn    = branchParticle.At(1).P4();
+        if neutrino is not None and "CC_DIS" == reaction or "CC_DIS_positron" == reaction:
+            pleptonOut   = neutrino.P4()
+        if electron is not None and ("NC_DIS" in reaction or "Photoproduction" in reaction):
+            pleptonOut = electron.P4()
+
         pPhoton      = pleptonIn - pleptonOut;
         #Q2, W2, Bjorken x, y, nu.
         Q2 = -pPhoton.M2()
@@ -587,11 +595,14 @@ if __name__ == '__main__':
     outfilename=sys.argv[2]
     n = None
     match_algorithm = "highestEnergy"
+    reaction="CC_DIS"
     for arg in sys.argv[3:]:
         if "--n=" in arg:
             n = int(arg.replace("--n=",""))
         elif "--match=" in arg:
             match_algorithm = arg.replace("--match=","")
+        elif "--reaction=" in arg:
+            reaction=arg.replace("--reaction=", "")
     hadronTuple = True
-    convert(infilename,outfilename, N=n,hadronTuple=hadronTuple,arg_maxR=0.9, match_algorithm=match_algorithm)
+    convert(infilename,outfilename, N=n,hadronTuple=hadronTuple,arg_maxR=0.9, match_algorithm=match_algorithm,reaction=reaction)
 

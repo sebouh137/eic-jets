@@ -1,6 +1,6 @@
 ! 1) Settings used in the main program.
 Main:numberOfEvents = 100000        ! number of events to generate
-Main:timesAllowErrors = 100          ! how many aborts before run stops
+Main:timesAllowErrors = 100000          ! how many aborts before run stops
 
 Random:setSeed = on
 Random:seed = 0
@@ -24,7 +24,7 @@ Beams:frameType = 2
 
 WeakBosonExchange:ff2ff(t:W) = on ! charged-current DIS
 #WeakBosonExchange:ff2ff(t:gmZ) = on ! neutral-current DIS
-PhaseSpace:Q2Min = 25
+PhaseSpace:Q2Min = 100
 PDF:lepton = off
 TimeShower:QEDshowerByL=off 
 SpaceShower:pTmaxMatch=2

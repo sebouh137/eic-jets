@@ -15,7 +15,7 @@ Next:numberShowEvent = 0           ! print event record n times
 
 ! 3) Beam parameter settings. Values below agree with default ones.
 Beams:idA = 2212                     ! electron
-Beams:idB = 11                       ! proton
+Beams:idB = -11                       ! proton
 Beams:eA  = 41                      ! proton energy
 Beams:eB  = 5                       ! electron energy
 Beams:frameType = 2 
